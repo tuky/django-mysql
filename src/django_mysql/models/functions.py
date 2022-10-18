@@ -240,7 +240,8 @@ class LastInsertId(Func):
         # database connections in Django, and the reason was not clear
         with connections[using].cursor() as cursor:
             cursor.execute("SELECT LAST_INSERT_ID()")
-            return cursor.fetchone()[0]
+            id_: int = cursor.fetchone()[0]
+            return id_
 
 
 # JSON Functions
@@ -329,7 +330,11 @@ class JSONValue(Expression):
         if connection.vendor != "mysql":  # pragma: no cover
             raise AssertionError("JSONValue only supports MySQL/MariaDB")
         json_string = json.dumps(self._data, allow_nan=False)
-        if connection.vendor == "mysql" and connection.mysql_is_mariadb:
+        if (
+            connection.vendor == "mysql"
+            # type narrowed by vendor check
+            and connection.mysql_is_mariadb  # type: ignore [attr-defined]
+        ):
             # MariaDB doesn't support explicit cast to JSON.
             return "JSON_EXTRACT(%s, '$')", (json_string,)
         else:
@@ -341,7 +346,7 @@ class BaseJSONModifyFunc(Func):
         self,
         expression: ExpressionArgument,
         data: dict[
-            str,
+            ExpressionArgument,
             (
                 ExpressionArgument
                 | None
@@ -359,12 +364,12 @@ class BaseJSONModifyFunc(Func):
         exprs = [expression]
 
         for path, value in data.items():
-            if not hasattr(path, "resolve_expression"):
+            if not isinstance(path, Expression):
                 path = Value(path)
 
             exprs.append(path)
 
-            if not hasattr(value, "resolve_expression"):
+            if not isinstance(value, Expression):
                 value = JSONValue(value)
 
             exprs.append(value)
@@ -463,19 +468,20 @@ class ColumnAdd(Func):
         self,
         expression: ExpressionArgument,
         to_add: dict[
-            str, ExpressionArgument | float | int | dt.date | dt.time | dt.datetime
+            ExpressionArgument,
+            ExpressionArgument | float | int | dt.date | dt.time | dt.datetime,
         ],
     ) -> None:
         from django_mysql.models.fields import DynamicField
 
         expressions = [expression]
         for name, value in to_add.items():
-            if not hasattr(name, "resolve_expression"):
+            if not isinstance(name, Expression):
                 name = Value(name)
 
-            if isinstance(value, dict):  # type: ignore [unreachable]
+            if isinstance(value, dict):
                 raise ValueError("ColumnAdd with nested values is not supported")
-            if not hasattr(value, "resolve_expression"):
+            if not isinstance(value, Expression):
                 value = Value(value)
 
             expressions.extend((name, value))
